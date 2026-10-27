@@ -57,6 +57,10 @@
             color: #555;
             margin-bottom: 15px;
         }
+
+        #botao-cancelar {
+            display: none;
+        }
     </style>
 </head>
 
@@ -65,13 +69,18 @@
     <h1>Catálogo de Jogos Gratuitos — Firestore + GamerPower API</h1>
     <p id="status">Pronto.</p>
 
-    <h3>Cadastrar novo jogo</h3>
+    <h3 id="titulo-formulario">Cadastrar novo jogo</h3>
+    
+    <!-- Campo oculto para guardar o ID quando estiver editando -->
+    <input type="hidden" id="id-jogo">
+
     <input id="nome" placeholder="Nome do jogo (digite para buscar na API ou cadastrar)">
     <input id="genero" placeholder="Gênero (ex: Game, RPG, DLC)">
     <input id="plataforma" placeholder="Plataforma (ex: PC, Steam, Epic Games)">
     <input id="imagem" placeholder="URL da Imagem (https://...)">
 
-    <button onclick="salvarJogo()">Salvar no Firestore</button>
+    <button id="botao-salvar" onclick="salvarJogo()">Salvar no Firestore</button>
+    <button id="botao-cancelar" onclick="cancelarEdicao()">Cancelar Edição</button>
     <button onclick="buscarNaApi()">Consultar API GamerPower</button>
 
     <h3>Jogos cadastrados no Firestore</h3>
@@ -99,7 +108,8 @@
         const db = getFirestore(app);
         const status = document.getElementById("status");
 
-        // CONSULTA NA API GAMERPOWER (https://www.gamerpower.com/api-read)
+        let jogosCarregados = {};
+
         window.buscarNaApi = async function () {
             const termoBusca = document.getElementById("nome").value.toLowerCase();
             const listaApi = document.getElementById("lista-api");
@@ -111,16 +121,14 @@
             try {
                 let resposta;
                 try {
-                    // Tenta requisição direta para a API
                     resposta = await fetch(urlApi);
+                    if (!resposta.ok) throw new Error("Falha no fetch direto");
                 } catch (erroCors) {
-                    // Fallback com proxy CORS caso o navegador bloqueie a chamada direta
                     resposta = await fetch("https://api.allorigins.win/raw?url=" + encodeURIComponent(urlApi));
                 }
 
                 const dados = await resposta.json();
 
-                // Filtra pelo nome digitado no campo #nome (ou pega os 10 primeiros se estiver vazio)
                 const jogosFiltrados = dados.filter((jogo) =>
                     jogo.title.toLowerCase().includes(termoBusca)
                 ).slice(0, 10);
@@ -130,35 +138,33 @@
                     return;
                 }
 
-                // Preenche automaticamente o formulário com o primeiro resultado encontrado
                 const primeiro = jogosFiltrados[0];
                 document.getElementById("nome").value = primeiro.title;
                 document.getElementById("genero").value = primeiro.type;
                 document.getElementById("plataforma").value = primeiro.platforms;
                 document.getElementById("imagem").value = primeiro.thumbnail;
 
-                // Exibe a lista de resultados da API abaixo para escolha
+                // Exibe a lista de resultados da API
                 jogosFiltrados.forEach((jogo) => {
                     const item = document.createElement("li");
                     item.className = "item-jogo";
 
-                    const tituloLimpo = jogo.title.replace(/'/g, "");
-                    const generoLimpo = jogo.type.replace(/'/g, "");
-                    const plataformaLimpa = jogo.platforms.replace(/'/g, "");
-                    const imagemLimpa = jogo.thumbnail;
+                    const botaoPreencher = document.createElement("button");
+                    botaoPreencher.textContent = "Preencher Formulário";
+                    botaoPreencher.onclick = function () {
+                        selecionarDaApi(jogo.title, jogo.type, jogo.platforms, jogo.thumbnail);
+                    };
 
                     item.innerHTML = `
-                        <img class="imagem-jogo" src="${imagemLimpa}" alt="${tituloLimpo}">
+                        <img class="imagem-jogo" src="${jogo.thumbnail}" alt="${jogo.title}">
                         <strong>${jogo.title}</strong><br>
                         Gênero: ${jogo.type} | Plataforma: ${jogo.platforms}<br><br>
-                        <button onclick="selecionarDaApi('${tituloLimpo}', '${generoLimpo}', '${plataformaLimpa}', '${imagemLimpa}')">
-                            Preencher Formulário
-                        </button>
                     `;
+                    item.appendChild(botaoPreencher);
                     listaApi.appendChild(item);
                 });
 
-                status.textContent = `${jogosFiltrados.length} jogo(s) encontrado(s) na API. O primeiro já preencheu os campos acima!`;
+                status.textContent = `${jogosFiltrados.length} jogo(s) encontrado(s) na API. O primeiro já preencheu o formulário!`;
             } catch (erro) {
                 status.textContent = "Erro ao consultar API: " + erro.message;
                 console.error(erro);
@@ -170,11 +176,12 @@
             document.getElementById("genero").value = genero;
             document.getElementById("plataforma").value = plataforma;
             document.getElementById("imagem").value = imagem;
-            status.textContent = "Dados preenchidos! Clique em 'Salvar no Firestore' para cadastrar.";
+            status.textContent = "Dados da API preenchidos no formulário!";
             window.scrollTo(0, 0);
         };
 
         window.salvarJogo = async function () {
+            const idJogo = document.getElementById("id-jogo").value;
             const nome = document.getElementById("nome").value;
             const genero = document.getElementById("genero").value;
             const plataforma = document.getElementById("plataforma").value;
@@ -186,15 +193,18 @@
             }
 
             try {
-                status.textContent = "Salvando...";
-                await addDoc(collection(db, "jogos"), { nome, genero, plataforma, imagem });
-                status.textContent = "Jogo salvo com sucesso.";
+                if (idJogo) {
+                    status.textContent = "Atualizando jogo...";
+                    const docRef = doc(db, "jogos", idJogo);
+                    await updateDoc(docRef, { nome, genero, plataforma, imagem });
+                    status.textContent = "Jogo atualizado com sucesso!";
+                } else {
+                    status.textContent = "Salvando novo jogo...";
+                    await addDoc(collection(db, "jogos"), { nome, genero, plataforma, imagem });
+                    status.textContent = "Jogo salvo com sucesso!";
+                }
 
-                document.getElementById("nome").value = "";
-                document.getElementById("genero").value = "";
-                document.getElementById("plataforma").value = "";
-                document.getElementById("imagem").value = "";
-
+                cancelarEdicao();
                 listarJogos();
             } catch (erro) {
                 status.textContent = "Erro ao salvar: " + erro.message;
@@ -205,18 +215,22 @@
         window.listarJogos = async function () {
             const lista = document.getElementById("lista");
             lista.innerHTML = "";
+            jogosCarregados = {};
             status.textContent = "Carregando...";
 
             try {
                 const querySnapshot = await getDocs(collection(db, "jogos"));
                 querySnapshot.forEach((documento) => {
                     const d = documento.data();
+                    const id = documento.id;
+                    jogosCarregados[id] = d;
+
                     lista.innerHTML += `
                         <li class="item-jogo">
                             <img class="imagem-jogo" src="${d.imagem}" alt="${d.nome}">
                             <strong>${d.nome}</strong> — ${d.genero} — ${d.plataforma}<br><br>
-                            <button onclick="editarJogo('${documento.id}')">Editar</button>
-                            <button onclick="apagarJogo('${documento.id}')">Apagar</button>
+                            <button onclick="prepararEdicao('${id}')">Editar</button>
+                            <button onclick="apagarJogo('${id}')">Apagar</button>
                         </li>
                     `;
                 });
@@ -227,28 +241,34 @@
             }
         };
 
-        window.editarJogo = async function (id) {
-            const novoNome = prompt("Novo nome do jogo:");
-            const novoGenero = prompt("Novo gênero:");
-            const novaPlataforma = prompt("Nova plataforma:");
-            const novaImagem = prompt("Nova URL da imagem:");
+        window.prepararEdicao = function (id) {
+            const jogo = jogosCarregados[id];
+            if (!jogo) return;
 
-            if (!novoNome || !novoGenero || !novaPlataforma || !novaImagem) return;
+            document.getElementById("id-jogo").value = id;
+            document.getElementById("nome").value = jogo.nome;
+            document.getElementById("genero").value = jogo.genero;
+            document.getElementById("plataforma").value = jogo.plataforma;
+            document.getElementById("imagem").value = jogo.imagem;
 
-            try {
-                const docRef = doc(db, "jogos", id);
-                await updateDoc(docRef, {
-                    nome: novoNome,
-                    genero: novoGenero,
-                    plataforma: novaPlataforma,
-                    imagem: novaImagem
-                });
-                status.textContent = "Jogo atualizado com sucesso.";
-                listarJogos();
-            } catch (erro) {
-                status.textContent = "Erro ao atualizar: " + erro.message;
-                console.error(erro);
-            }
+            document.getElementById("titulo-formulario").textContent = "Editando jogo";
+            document.getElementById("botao-salvar").textContent = "Atualizar Jogo";
+            document.getElementById("botao-cancelar").style.display = "inline-block";
+
+            status.textContent = "Altere os campos desejados e clique em 'Atualizar Jogo'.";
+            window.scrollTo(0, 0);
+        };
+
+        window.cancelarEdicao = function () {
+            document.getElementById("id-jogo").value = "";
+            document.getElementById("nome").value = "";
+            document.getElementById("genero").value = "";
+            document.getElementById("plataforma").value = "";
+            document.getElementById("imagem").value = "";
+
+            document.getElementById("titulo-formulario").textContent = "Cadastrar novo jogo";
+            document.getElementById("botao-salvar").textContent = "Salvar no Firestore";
+            document.getElementById("botao-cancelar").style.display = "none";
         };
 
         window.apagarJogo = async function (id) {
@@ -259,6 +279,10 @@
                 const docRef = doc(db, "jogos", id);
                 await deleteDoc(docRef);
                 status.textContent = "Jogo apagado com sucesso.";
+                
+                if (document.getElementById("id-jogo").value === id) {
+                    cancelarEdicao();
+                }
                 listarJogos();
             } catch (erro) {
                 status.textContent = "Erro ao apagar: " + erro.message;
