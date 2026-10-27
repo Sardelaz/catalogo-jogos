@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Catálogo de Jogos Gratuitos - Firestore + API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 550px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        h1 {
+            font-size: 20px;
+        }
+
+        input {
+            display: block;
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin-right: 8px;
+            margin-bottom: 15px;
+            cursor: pointer;
+        }
+
+        ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .item-jogo {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+
+        .imagem-jogo {
+            width: 100%;
+            max-height: 160px;
+            object-fit: cover;
+            display: block;
+            margin-bottom: 8px;
+            border-radius: 4px;
+        }
+
+        #status {
+            font-size: 13px;
+            color: #555;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Catálogo de Jogos Gratuitos — Firestore + GamerPower API</h1>
+    <p id="status">Pronto.</p>
+
+    <h3>Cadastrar novo jogo</h3>
+    <input id="nome" placeholder="Nome do jogo (digite para buscar na API ou cadastrar)">
+    <input id="genero" placeholder="Gênero (ex: Game, RPG, DLC)">
+    <input id="plataforma" placeholder="Plataforma (ex: PC, Steam, Epic Games)">
+    <input id="imagem" placeholder="URL da Imagem (https://...)">
+
+    <button onclick="salvarJogo()">Salvar no Firestore</button>
+    <button onclick="buscarNaApi()">Consultar API GamerPower</button>
+
+    <h3>Jogos cadastrados no Firestore</h3>
+    <button onclick="listarJogos()">Listar do Banco</button>
+    <ul id="lista"></ul>
+
+    <h3>Resultados da API GamerPower</h3>
+    <ul id="lista-api"></ul>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc }
+            from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyD7JtARNogSS7c0OmnzAIdX2qHF1TFIXmc",
+            authDomain: "nuvem-sardela.firebaseapp.com",
+            projectId: "nuvem-sardela",
+            storageBucket: "nuvem-sardela.firebasestorage.app",
+            messagingSenderId: "999690619793",
+            appId: "1:999690619793:web:dca1bb526f8f99498ee830"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const status = document.getElementById("status");
+
+        // CONSULTA NA API GAMERPOWER (https://www.gamerpower.com/api-read)
+        window.buscarNaApi = async function () {
+            const termoBusca = document.getElementById("nome").value.toLowerCase();
+            const listaApi = document.getElementById("lista-api");
+            listaApi.innerHTML = "";
+            status.textContent = "Consultando API GamerPower...";
+
+            const urlApi = "https://www.gamerpower.com/api/giveaways";
+
+            try {
+                let resposta;
+                try {
+                    // Tenta requisição direta para a API
+                    resposta = await fetch(urlApi);
+                } catch (erroCors) {
+                    // Fallback com proxy CORS caso o navegador bloqueie a chamada direta
+                    resposta = await fetch("https://api.allorigins.win/raw?url=" + encodeURIComponent(urlApi));
+                }
+
+                const dados = await resposta.json();
+
+                // Filtra pelo nome digitado no campo #nome (ou pega os 10 primeiros se estiver vazio)
+                const jogosFiltrados = dados.filter((jogo) =>
+                    jogo.title.toLowerCase().includes(termoBusca)
+                ).slice(0, 10);
+
+                if (jogosFiltrados.length === 0) {
+                    status.textContent = "Nenhum jogo encontrado na API com esse nome.";
+                    return;
+                }
+
+                // Preenche automaticamente o formulário com o primeiro resultado encontrado
+                const primeiro = jogosFiltrados[0];
+                document.getElementById("nome").value = primeiro.title;
+                document.getElementById("genero").value = primeiro.type;
+                document.getElementById("plataforma").value = primeiro.platforms;
+                document.getElementById("imagem").value = primeiro.thumbnail;
+
+                // Exibe a lista de resultados da API abaixo para escolha
+                jogosFiltrados.forEach((jogo) => {
+                    const item = document.createElement("li");
+                    item.className = "item-jogo";
+
+                    const tituloLimpo = jogo.title.replace(/'/g, "");
+                    const generoLimpo = jogo.type.replace(/'/g, "");
+                    const plataformaLimpa = jogo.platforms.replace(/'/g, "");
+                    const imagemLimpa = jogo.thumbnail;
+
+                    item.innerHTML = `
+                        <img class="imagem-jogo" src="${imagemLimpa}" alt="${tituloLimpo}">
+                        <strong>${jogo.title}</strong><br>
+                        Gênero: ${jogo.type} | Plataforma: ${jogo.platforms}<br><br>
+                        <button onclick="selecionarDaApi('${tituloLimpo}', '${generoLimpo}', '${plataformaLimpa}', '${imagemLimpa}')">
+                            Preencher Formulário
+                        </button>
+                    `;
+                    listaApi.appendChild(item);
+                });
+
+                status.textContent = `${jogosFiltrados.length} jogo(s) encontrado(s) na API. O primeiro já preencheu os campos acima!`;
+            } catch (erro) {
+                status.textContent = "Erro ao consultar API: " + erro.message;
+                console.error(erro);
+            }
+        };
+
+        window.selecionarDaApi = function (nome, genero, plataforma, imagem) {
+            document.getElementById("nome").value = nome;
+            document.getElementById("genero").value = genero;
+            document.getElementById("plataforma").value = plataforma;
+            document.getElementById("imagem").value = imagem;
+            status.textContent = "Dados preenchidos! Clique em 'Salvar no Firestore' para cadastrar.";
+            window.scrollTo(0, 0);
+        };
+
+        window.salvarJogo = async function () {
+            const nome = document.getElementById("nome").value;
+            const genero = document.getElementById("genero").value;
+            const plataforma = document.getElementById("plataforma").value;
+            const imagem = document.getElementById("imagem").value;
+
+            if (!nome || !genero || !plataforma || !imagem) {
+                status.textContent = "Preencha todos os campos antes de salvar.";
+                return;
+            }
+
+            try {
+                status.textContent = "Salvando...";
+                await addDoc(collection(db, "jogos"), { nome, genero, plataforma, imagem });
+                status.textContent = "Jogo salvo com sucesso.";
+
+                document.getElementById("nome").value = "";
+                document.getElementById("genero").value = "";
+                document.getElementById("plataforma").value = "";
+                document.getElementById("imagem").value = "";
+
+                listarJogos();
+            } catch (erro) {
+                status.textContent = "Erro ao salvar: " + erro.message;
+                console.error(erro);
+            }
+        };
+
+        window.listarJogos = async function () {
+            const lista = document.getElementById("lista");
+            lista.innerHTML = "";
+            status.textContent = "Carregando...";
+
+            try {
+                const querySnapshot = await getDocs(collection(db, "jogos"));
+                querySnapshot.forEach((documento) => {
+                    const d = documento.data();
+                    lista.innerHTML += `
+                        <li class="item-jogo">
+                            <img class="imagem-jogo" src="${d.imagem}" alt="${d.nome}">
+                            <strong>${d.nome}</strong> — ${d.genero} — ${d.plataforma}<br><br>
+                            <button onclick="editarJogo('${documento.id}')">Editar</button>
+                            <button onclick="apagarJogo('${documento.id}')">Apagar</button>
+                        </li>
+                    `;
+                });
+                status.textContent = `${querySnapshot.size} jogo(s) carregado(s) do Firestore.`;
+            } catch (erro) {
+                status.textContent = "Erro ao listar: " + erro.message;
+                console.error(erro);
+            }
+        };
+
+        window.editarJogo = async function (id) {
+            const novoNome = prompt("Novo nome do jogo:");
+            const novoGenero = prompt("Novo gênero:");
+            const novaPlataforma = prompt("Nova plataforma:");
+            const novaImagem = prompt("Nova URL da imagem:");
+
+            if (!novoNome || !novoGenero || !novaPlataforma || !novaImagem) return;
+
+            try {
+                const docRef = doc(db, "jogos", id);
+                await updateDoc(docRef, {
+                    nome: novoNome,
+                    genero: novoGenero,
+                    plataforma: novaPlataforma,
+                    imagem: novaImagem
+                });
+                status.textContent = "Jogo atualizado com sucesso.";
+                listarJogos();
+            } catch (erro) {
+                status.textContent = "Erro ao atualizar: " + erro.message;
+                console.error(erro);
+            }
+        };
+
+        window.apagarJogo = async function (id) {
+            const confirmar = confirm("Tem certeza que deseja apagar este jogo?");
+            if (!confirmar) return;
+
+            try {
+                const docRef = doc(db, "jogos", id);
+                await deleteDoc(docRef);
+                status.textContent = "Jogo apagado com sucesso.";
+                listarJogos();
+            } catch (erro) {
+                status.textContent = "Erro ao apagar: " + erro.message;
+                console.error(erro);
+            }
+        };
+    </script>
+
+</body>
+
+</html>
